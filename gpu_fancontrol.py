@@ -69,9 +69,26 @@ def detect_gpus() -> list[dict]:
         except Exception:
             num_fans = 0
             fan_speed = 0
+        try:
+            mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+            mem_used = mem.used / (1024 ** 3)
+            mem_total = mem.total / (1024 ** 3)
+        except Exception:
+            mem_used = 0.0
+            mem_total = 0.0
+        try:
+            power_usage = pynvml.nvmlDeviceGetPowerUsage(h) / 1000.0
+        except Exception:
+            power_usage = 0.0
+        try:
+            power_limit = pynvml.nvmlDeviceGetEnforcedPowerLimit(h) / 1000.0
+        except Exception:
+            power_limit = 0.0
         gpus.append({
             "index": i, "name": name, "temp": temp,
             "fan_speed": fan_speed, "num_fans": num_fans,
+            "mem_used": mem_used, "mem_total": mem_total,
+            "power_usage": power_usage, "power_limit": power_limit,
         })
     pynvml.nvmlShutdown()
     return gpus
@@ -85,6 +102,16 @@ def poll_gpu_stats(gpus: list[dict]):
         try:
             if gpu["num_fans"] > 0:
                 gpu["fan_speed"] = pynvml.nvmlDeviceGetFanSpeed_v2(h, 0)
+        except Exception:
+            pass
+        try:
+            mem = pynvml.nvmlDeviceGetMemoryInfo(h)
+            gpu["mem_used"] = mem.used / (1024 ** 3)
+            gpu["mem_total"] = mem.total / (1024 ** 3)
+        except Exception:
+            pass
+        try:
+            gpu["power_usage"] = pynvml.nvmlDeviceGetPowerUsage(h) / 1000.0
         except Exception:
             pass
     pynvml.nvmlShutdown()
@@ -359,11 +386,35 @@ class GPUFanControlApp:
 
         # Fan speed bar
         bar_frame = tk.Frame(panel, bg=BG_INPUT, height=8)
-        bar_frame.pack(fill="x", padx=12, pady=(0, 12))
+        bar_frame.pack(fill="x", padx=12, pady=(0, 8))
         bar_frame.pack_propagate(False)
         w["fan_bar"] = tk.Frame(bar_frame, bg=ACCENT, height=8)
         w["fan_bar"].place(relx=0, rely=0, relheight=1.0,
                            relwidth=max(0.01, gpu["fan_speed"] / 100))
+
+        # Memory + Power stats row
+        stats_frame = tk.Frame(panel, bg=BG_PANEL)
+        stats_frame.pack(fill="x", padx=12, pady=(0, 8))
+
+        mem_col = tk.Frame(stats_frame, bg=BG_PANEL)
+        mem_col.pack(side="left", expand=True, anchor="w")
+        tk.Label(mem_col, text="VRAM", font=("Sans", 9), fg=FG_DIM, bg=BG_PANEL).pack(anchor="w")
+        mem_used = gpu.get("mem_used", 0.0)
+        mem_total = gpu.get("mem_total", 0.0)
+        w["mem_label"] = tk.Label(mem_col,
+                                  text=f"{mem_used:.1f} / {mem_total:.0f} GB",
+                                  font=("Sans", 11, "bold"), fg=FG, bg=BG_PANEL)
+        w["mem_label"].pack(anchor="w")
+
+        pwr_col = tk.Frame(stats_frame, bg=BG_PANEL)
+        pwr_col.pack(side="right", anchor="e")
+        tk.Label(pwr_col, text="POWER", font=("Sans", 9), fg=FG_DIM, bg=BG_PANEL).pack(anchor="e")
+        power_usage = gpu.get("power_usage", 0.0)
+        power_limit = gpu.get("power_limit", 0.0)
+        w["pwr_label"] = tk.Label(pwr_col,
+                                  text=f"{power_usage:.0f} / {power_limit:.0f} W",
+                                  font=("Sans", 11, "bold"), fg=FG, bg=BG_PANEL)
+        w["pwr_label"].pack(anchor="e")
 
         tk.Frame(panel, bg=BORDER, height=1).pack(fill="x", padx=12, pady=4)
 
@@ -538,6 +589,15 @@ class GPUFanControlApp:
             elif fan >= 40: bar_color = YELLOW
             else: bar_color = GREEN
             w["fan_bar"].config(bg=bar_color)
+
+            mem_used = gpu.get("mem_used", 0.0)
+            mem_total = gpu.get("mem_total", 0.0)
+            w["mem_label"].config(text=f"{mem_used:.1f} / {mem_total:.0f} GB")
+
+            power_usage = gpu.get("power_usage", 0.0)
+            power_limit = gpu.get("power_limit", 0.0)
+            w["pwr_label"].config(text=f"{power_usage:.0f} / {power_limit:.0f} W")
+
             self._draw_curve(idx)
 
     # -----------------------------------------------------------------------
