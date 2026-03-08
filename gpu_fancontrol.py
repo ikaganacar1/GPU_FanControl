@@ -38,6 +38,13 @@ DEFAULT_CURVES = {
     "default":  [(0, 30), (50, 35), (60, 50), (70, 75), (80, 100)],
 }
 
+PROFILES = {
+    "Silent":     [(0, 30), (50, 30), (60, 35), (65, 42), (70, 55), (75, 72), (80, 100)],
+    "Balanced":   [(0, 30), (50, 35), (60, 50), (65, 60), (70, 75), (75, 85), (80, 100)],
+    "Aggressive": [(0, 40), (50, 50), (55, 65), (60, 75), (65, 85), (70, 95), (75, 100)],
+    "Max":        [(0, 60), (40, 70), (50, 80), (55, 90), (60, 100), (70, 100), (80, 100)],
+}
+
 POLL_INTERVAL_MS = 3000
 
 # Dark theme colors (Catppuccin Mocha)
@@ -286,6 +293,7 @@ class GPUFanControlApp:
                 "mode": saved.get("mode", "auto"),
                 "manual_speed": saved.get("manual_speed", 50),
                 "curve": [tuple(p) for p in saved.get("curve", default_curve)],
+                "profile": saved.get("profile", None),
                 "current_speed": 0,
             }
 
@@ -482,10 +490,28 @@ class GPUFanControlApp:
             command=lambda i=idx: self._reset_curve(i),
         ).pack(side="right")
 
+        # Profile preset buttons
+        prof_frame = tk.Frame(cf, bg=BG_PANEL)
+        prof_frame.pack(fill="x", padx=12, pady=(4, 2))
+        w["profile_btns"] = {}
+        for pname in PROFILES:
+            btn = tk.Button(
+                prof_frame, text=pname, font=("Sans", 8),
+                bg=BG_INPUT, fg=FG_DIM,
+                activebackground=ACCENT, activeforeground=BG,
+                relief="flat", padx=6, pady=2, cursor="hand2",
+                command=lambda n=pname, i=idx: self._apply_profile(i, n),
+            )
+            btn.pack(side="left", padx=(0, 4))
+            w["profile_btns"][pname] = btn
+        # Highlight saved profile if any
+        if state.get("profile") in PROFILES:
+            w["profile_btns"][state["profile"]].config(bg=ACCENT, fg=BG)
+
         w["curve_canvas"] = tk.Canvas(cf, width=260, height=120,
                                       bg=BG_INPUT, highlightthickness=0,
                                       cursor="crosshair")
-        w["curve_canvas"].pack(padx=12, pady=4)
+        w["curve_canvas"].pack(padx=12, pady=(2, 4))
         w["curve_canvas"].bind("<ButtonPress-1>",
                                lambda e, i=idx: self._curve_mouse_down(e, i))
         w["curve_canvas"].bind("<B1-Motion>",
@@ -495,6 +521,7 @@ class GPUFanControlApp:
 
         pf = tk.Frame(cf, bg=BG_PANEL)
         pf.pack(fill="x", padx=12, pady=(0, 8))
+        w["curve_entries_frame"] = pf
         tk.Label(pf, text="Temp\u00b0C:", font=("Sans", 8), fg=FG_DIM,
                  bg=BG_PANEL).grid(row=0, column=0, sticky="w")
         tk.Label(pf, text="Fan %:", font=("Sans", 8), fg=FG_DIM,
@@ -656,6 +683,52 @@ class GPUFanControlApp:
         self.gui_widgets[gpu_idx]["manual_label"].config(text=f"{value}%")
         self._save_config()
 
+    def _rebuild_curve_entries(self, gpu_idx):
+        """Destroy and recreate the entry widgets to match the current curve."""
+        w = self.gui_widgets[gpu_idx]
+        pf = w["curve_entries_frame"]
+        for widget in list(pf.winfo_children()):
+            if int(widget.grid_info().get("column", 0)) > 0:
+                widget.destroy()
+        curve = self.gpu_states[gpu_idx]["curve"]
+        w["curve_entries"] = []
+        for j, (t, s) in enumerate(curve):
+            tv = tk.StringVar(value=str(t))
+            sv = tk.StringVar(value=str(s))
+            tk.Entry(pf, textvariable=tv, width=4, font=("Sans", 8),
+                     bg=BG_INPUT, fg=FG, insertbackground=FG, relief="flat",
+                     justify="center").grid(row=0, column=j + 1, padx=1)
+            tk.Entry(pf, textvariable=sv, width=4, font=("Sans", 8),
+                     bg=BG_INPUT, fg=FG, insertbackground=FG, relief="flat",
+                     justify="center").grid(row=1, column=j + 1, padx=1)
+            w["curve_entries"].append((tv, sv))
+            tv.trace_add("write", lambda *a, i=gpu_idx: self._on_curve_change(i))
+            sv.trace_add("write", lambda *a, i=gpu_idx: self._on_curve_change(i))
+
+    def _apply_profile(self, gpu_idx, profile_name):
+        curve = [tuple(p) for p in PROFILES[profile_name]]
+        self.gpu_states[gpu_idx]["curve"] = curve
+        self.gpu_states[gpu_idx]["profile"] = profile_name
+        self._dragging.add(gpu_idx)
+        self._rebuild_curve_entries(gpu_idx)
+        self._dragging.discard(gpu_idx)
+        # Update button highlights
+        w = self.gui_widgets[gpu_idx]
+        for name, btn in w["profile_btns"].items():
+            btn.config(bg=ACCENT if name == profile_name else BG_INPUT,
+                       fg=BG if name == profile_name else FG_DIM)
+        self._draw_curve(gpu_idx)
+        self._save_config()
+
+    def _deselect_profiles(self, gpu_idx):
+        """Clear profile highlight when user manually edits the curve."""
+        if self.gpu_states[gpu_idx].get("profile") is not None:
+            self.gpu_states[gpu_idx]["profile"] = None
+            w = self.gui_widgets.get(gpu_idx)
+            if w:
+                for btn in w["profile_btns"].values():
+                    btn.config(bg=BG_INPUT, fg=FG_DIM)
+
     def _reset_curve(self, gpu_idx):
         gpu = next(g for g in self.gpus if g["index"] == gpu_idx)
         default_curve = DEFAULT_CURVES["default"]
@@ -677,6 +750,7 @@ class GPUFanControlApp:
     def _on_curve_change(self, gpu_idx):
         if gpu_idx in self._dragging:
             return
+        self._deselect_profiles(gpu_idx)
         w = self.gui_widgets[gpu_idx]
         fan_min = next((g["fan_min"] for g in self.gpus if g["index"] == gpu_idx), 0)
         fan_max = next((g["fan_max"] for g in self.gpus if g["index"] == gpu_idx), 100)
@@ -757,6 +831,7 @@ class GPUFanControlApp:
         """Sync entry widgets with final dragged curve and save."""
         self._dragging.discard(gpu_idx)
         if self._drag_states.get(gpu_idx) is not None:
+            self._deselect_profiles(gpu_idx)
             curve = self.gpu_states[gpu_idx]["curve"]
             w = self.gui_widgets[gpu_idx]
             for j, (tv, sv) in enumerate(w["curve_entries"]):
@@ -828,6 +903,7 @@ class GPUFanControlApp:
                 "mode": state["mode"],
                 "manual_speed": state["manual_speed"],
                 "curve": state["curve"],
+                "profile": state.get("profile"),
             }
         save_config(cfg)
 
