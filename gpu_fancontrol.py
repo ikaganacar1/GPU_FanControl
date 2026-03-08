@@ -253,6 +253,10 @@ class GPUFanControlApp:
         self.helper = FanHelper()
         self.start_minimized = start_minimized
 
+        # Drag state for curve canvas interaction
+        self._drag_states = {}   # gpu_idx -> point index being dragged, or None
+        self._dragging = set()   # gpu_idxes currently being dragged (suppresses trace callbacks)
+
         # Per-GPU state
         self.gpu_states = {}
         cfg = load_config()
@@ -458,8 +462,15 @@ class GPUFanControlApp:
                  bg=BG_PANEL).pack(anchor="w", padx=12)
 
         w["curve_canvas"] = tk.Canvas(cf, width=260, height=120,
-                                      bg=BG_INPUT, highlightthickness=0)
+                                      bg=BG_INPUT, highlightthickness=0,
+                                      cursor="crosshair")
         w["curve_canvas"].pack(padx=12, pady=4)
+        w["curve_canvas"].bind("<ButtonPress-1>",
+                               lambda e, i=idx: self._curve_mouse_down(e, i))
+        w["curve_canvas"].bind("<B1-Motion>",
+                               lambda e, i=idx: self._curve_mouse_drag(e, i))
+        w["curve_canvas"].bind("<ButtonRelease-1>",
+                               lambda e, i=idx: self._curve_mouse_up(e, i))
 
         pf = tk.Frame(cf, bg=BG_PANEL)
         pf.pack(fill="x", padx=12, pady=(0, 8))
@@ -624,6 +635,8 @@ class GPUFanControlApp:
         self._save_config()
 
     def _on_curve_change(self, gpu_idx):
+        if gpu_idx in self._dragging:
+            return
         w = self.gui_widgets[gpu_idx]
         curve = []
         try:
@@ -637,6 +650,76 @@ class GPUFanControlApp:
             self._save_config()
         except (ValueError, Exception):
             pass
+
+    # -----------------------------------------------------------------------
+    # Curve canvas drag interaction
+    # -----------------------------------------------------------------------
+
+    _CURVE_CW, _CURVE_CH, _CURVE_PAD = 260, 120, 20
+
+    def _canvas_to_curve(self, x, y):
+        """Convert canvas pixel coords to (temp, fan_speed) clamped 0-100."""
+        pw = self._CURVE_CW - 2 * self._CURVE_PAD
+        ph = self._CURVE_CH - 2 * self._CURVE_PAD
+        t = max(0, min(100, round((x - self._CURVE_PAD) / pw * 100)))
+        s = max(0, min(100, round((self._CURVE_CH - self._CURVE_PAD - y) / ph * 100)))
+        return t, s
+
+    def _curve_points_px(self, gpu_idx):
+        """Return canvas pixel coords for all curve points."""
+        pw = self._CURVE_CW - 2 * self._CURVE_PAD
+        ph = self._CURVE_CH - 2 * self._CURVE_PAD
+        return [
+            (self._CURVE_PAD + (t / 100) * pw,
+             self._CURVE_CH - self._CURVE_PAD - (s / 100) * ph)
+            for t, s in self.gpu_states[gpu_idx]["curve"]
+        ]
+
+    def _curve_mouse_down(self, event, gpu_idx):
+        """Select nearest curve point within 15px for dragging."""
+        points = self._curve_points_px(gpu_idx)
+        best_i, best_d = None, 15
+        for i, (px, py) in enumerate(points):
+            d = ((event.x - px) ** 2 + (event.y - py) ** 2) ** 0.5
+            if d < best_d:
+                best_d = d
+                best_i = i
+        self._drag_states[gpu_idx] = best_i
+
+    def _curve_mouse_drag(self, event, gpu_idx):
+        """Move the selected point, re-sort curve, redraw."""
+        point_idx = self._drag_states.get(gpu_idx)
+        if point_idx is None:
+            return
+
+        t, s = self._canvas_to_curve(event.x, event.y)
+        self._dragging.add(gpu_idx)
+
+        curve = list(self.gpu_states[gpu_idx]["curve"])
+        curve[point_idx] = (t, s)
+        curve.sort(key=lambda p: p[0])
+
+        # Track the dragged point through the sort (in case it crossed another)
+        for new_i, (ct, cs) in enumerate(curve):
+            if ct == t and cs == s:
+                self._drag_states[gpu_idx] = new_i
+                break
+
+        self.gpu_states[gpu_idx]["curve"] = curve
+        self._draw_curve(gpu_idx)
+
+    def _curve_mouse_up(self, event, gpu_idx):
+        """Sync entry widgets with final dragged curve and save."""
+        self._dragging.discard(gpu_idx)
+        if self._drag_states.get(gpu_idx) is not None:
+            curve = self.gpu_states[gpu_idx]["curve"]
+            w = self.gui_widgets[gpu_idx]
+            for j, (tv, sv) in enumerate(w["curve_entries"]):
+                if j < len(curve):
+                    tv.set(str(curve[j][0]))
+                    sv.set(str(curve[j][1]))
+            self._save_config()
+        self._drag_states[gpu_idx] = None
 
     def _draw_curve(self, gpu_idx):
         w = self.gui_widgets.get(gpu_idx)
@@ -665,8 +748,14 @@ class GPUFanControlApp:
 
         for i in range(len(points) - 1):
             canvas.create_line(*points[i], *points[i + 1], fill=ACCENT, width=2)
-        for x, y in points:
-            canvas.create_oval(x - 4, y - 4, x + 4, y + 4, fill=ACCENT, outline="")
+        drag_i = self._drag_states.get(gpu_idx)
+        for i, (x, y) in enumerate(points):
+            if i == drag_i:
+                canvas.create_oval(x - 6, y - 6, x + 6, y + 6,
+                                   fill=GREEN, outline="white", width=1)
+            else:
+                canvas.create_oval(x - 4, y - 4, x + 4, y + 4,
+                                   fill=ACCENT, outline="")
 
         # Current temp marker
         for gpu in self.gpus:
