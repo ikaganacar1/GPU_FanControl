@@ -19,6 +19,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
 
+import ctypes
 import pynvml
 from PIL import Image, ImageDraw
 
@@ -56,6 +57,16 @@ BORDER = "#45475a"
 # GPU detection via pynvml
 # ---------------------------------------------------------------------------
 
+def get_fan_min_max(handle) -> tuple[int, int]:
+    """Return (min_speed, max_speed) percent for the GPU. Falls back to (0, 100)."""
+    try:
+        mn, mx = ctypes.c_uint(), ctypes.c_uint()
+        pynvml.nvmlDeviceGetMinMaxFanSpeed(handle, ctypes.byref(mn), ctypes.byref(mx))
+        return mn.value, mx.value
+    except Exception:
+        return 0, 100
+
+
 def detect_gpus() -> list[dict]:
     pynvml.nvmlInit()
     gpus = []
@@ -84,11 +95,13 @@ def detect_gpus() -> list[dict]:
             power_limit = pynvml.nvmlDeviceGetEnforcedPowerLimit(h) / 1000.0
         except Exception:
             power_limit = 0.0
+        fan_min, fan_max = get_fan_min_max(h)
         gpus.append({
             "index": i, "name": name, "temp": temp,
             "fan_speed": fan_speed, "num_fans": num_fans,
             "mem_used": mem_used, "mem_total": mem_total,
             "power_usage": power_usage, "power_limit": power_limit,
+            "fan_min": fan_min, "fan_max": fan_max,
         })
     pynvml.nvmlShutdown()
     return gpus
@@ -449,7 +462,7 @@ class GPUFanControlApp:
                                      font=("Sans", 12, "bold"), fg=ACCENT,
                                      bg=BG_PANEL, width=5)
         w["manual_label"].pack(side="right")
-        tk.Scale(sf, from_=20, to=100, orient="horizontal",
+        tk.Scale(sf, from_=gpu.get("fan_min", 0), to=gpu.get("fan_max", 100), orient="horizontal",
                  variable=w["manual_var"], showvalue=False,
                  bg=BG_PANEL, fg=FG, troughcolor=BG_INPUT, highlightthickness=0,
                  activebackground=ACCENT, sliderrelief="flat", length=200,
@@ -572,6 +585,7 @@ class GPUFanControlApp:
                         target = interpolate_curve(state["curve"], gpu["temp"])
                     else:
                         target = state["manual_speed"]
+                    target = max(gpu.get("fan_min", 0), min(gpu.get("fan_max", 100), target))
                     state["current_speed"] = target
                     for fan in range(gpu["num_fans"]):
                         self.helper.set_fan(idx, fan, target)
@@ -638,11 +652,13 @@ class GPUFanControlApp:
         if gpu_idx in self._dragging:
             return
         w = self.gui_widgets[gpu_idx]
+        fan_min = next((g["fan_min"] for g in self.gpus if g["index"] == gpu_idx), 0)
+        fan_max = next((g["fan_max"] for g in self.gpus if g["index"] == gpu_idx), 100)
         curve = []
         try:
             for tv, sv in w["curve_entries"]:
                 t = int(tv.get())
-                s = max(0, min(100, int(sv.get())))
+                s = max(fan_min, min(fan_max, int(sv.get())))
                 curve.append((t, s))
             curve.sort(key=lambda p: p[0])
             self.gpu_states[gpu_idx]["curve"] = curve
@@ -692,7 +708,10 @@ class GPUFanControlApp:
         if point_idx is None:
             return
 
+        fan_min = next((g["fan_min"] for g in self.gpus if g["index"] == gpu_idx), 0)
+        fan_max = next((g["fan_max"] for g in self.gpus if g["index"] == gpu_idx), 100)
         t, s = self._canvas_to_curve(event.x, event.y)
+        s = max(fan_min, min(fan_max, s))
         self._dragging.add(gpu_idx)
 
         curve = list(self.gpu_states[gpu_idx]["curve"])
@@ -739,6 +758,14 @@ class GPUFanControlApp:
             y = ch - pad - (s / 100) * ph
             canvas.create_line(pad, y, cw - pad, y, fill=BORDER, dash=(2, 4))
             canvas.create_text(8, y, text=f"{s}", fill=FG_DIM, font=("Sans", 7), anchor="w")
+
+        # Min fan speed floor line
+        fan_min = next((g["fan_min"] for g in self.gpus if g["index"] == gpu_idx), 0)
+        if fan_min > 0:
+            min_y = ch - pad - (fan_min / 100) * ph
+            canvas.create_line(pad, min_y, cw - pad, min_y, fill=ORANGE, dash=(3, 3))
+            canvas.create_text(cw - pad - 2, min_y - 4, text=f"min {fan_min}%",
+                               fill=ORANGE, font=("Sans", 7), anchor="e")
 
         curve = self.gpu_states[gpu_idx]["curve"]
         if len(curve) < 2:
