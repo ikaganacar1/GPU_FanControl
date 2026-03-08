@@ -471,8 +471,16 @@ class GPUFanControlApp:
 
         # Auto curve editor
         w["curve_frame"] = cf = tk.Frame(panel, bg=BG_PANEL)
-        tk.Label(cf, text="Fan Curve", font=("Sans", 10), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="w", padx=12)
+        curve_header = tk.Frame(cf, bg=BG_PANEL)
+        curve_header.pack(fill="x", padx=12)
+        tk.Label(curve_header, text="Fan Curve", font=("Sans", 10), fg=FG_DIM,
+                 bg=BG_PANEL).pack(side="left")
+        tk.Button(
+            curve_header, text="Reset", font=("Sans", 8),
+            bg=BG_INPUT, fg=FG_DIM, activebackground=ORANGE, activeforeground=BG,
+            relief="flat", padx=6, pady=1, cursor="hand2",
+            command=lambda i=idx: self._reset_curve(i),
+        ).pack(side="right")
 
         w["curve_canvas"] = tk.Canvas(cf, width=260, height=120,
                                       bg=BG_INPUT, highlightthickness=0,
@@ -646,6 +654,24 @@ class GPUFanControlApp:
     def _on_manual_change(self, gpu_idx, value):
         self.gpu_states[gpu_idx]["manual_speed"] = value
         self.gui_widgets[gpu_idx]["manual_label"].config(text=f"{value}%")
+        self._save_config()
+
+    def _reset_curve(self, gpu_idx):
+        gpu = next(g for g in self.gpus if g["index"] == gpu_idx)
+        default_curve = DEFAULT_CURVES["default"]
+        for key in DEFAULT_CURVES:
+            if key in gpu["name"]:
+                default_curve = DEFAULT_CURVES[key]
+                break
+        self.gpu_states[gpu_idx]["curve"] = [tuple(p) for p in default_curve]
+        w = self.gui_widgets[gpu_idx]
+        self._dragging.add(gpu_idx)
+        for j, (tv, sv) in enumerate(w["curve_entries"]):
+            if j < len(default_curve):
+                tv.set(str(default_curve[j][0]))
+                sv.set(str(default_curve[j][1]))
+        self._dragging.discard(gpu_idx)
+        self._draw_curve(gpu_idx)
         self._save_config()
 
     def _on_curve_change(self, gpu_idx):
