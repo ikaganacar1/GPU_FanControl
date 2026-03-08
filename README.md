@@ -1,6 +1,6 @@
 # GPU Fan Control
 
-A Linux GUI application for independent NVIDIA GPU fan control without requiring Coolbits. Uses pynvml via a root helper subprocess for direct fan management.
+The NVIDIA driver's fan control logic wasn't doing it for me — too conservative, too opaque — so I built my own. This is a Linux GUI application for independent NVIDIA GPU fan control without requiring Coolbits. Uses pynvml via a root helper subprocess for direct fan management.
 
 ![Screenshot](screenshot.png)
 
