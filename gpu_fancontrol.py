@@ -443,8 +443,8 @@ class GPUFanControlApp:
         # Same grid container as GPU panels
         sys_frame = tk.Frame(parent, bg=BG)
         sys_frame.pack(fill="x", pady=(0, 10))
-        sys_frame.columnconfigure(0, weight=1)
-        sys_frame.columnconfigure(1, weight=1)
+        sys_frame.columnconfigure(0, weight=1, uniform="sys")
+        sys_frame.columnconfigure(1, weight=1, uniform="sys")
 
         # ── Left panel: CPU + Memory (col 0) ─────────────────────────────────
         lp = tk.Frame(sys_frame, bg=BG_PANEL, relief="flat", bd=0,
