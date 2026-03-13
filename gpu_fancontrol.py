@@ -437,85 +437,92 @@ class GPUFanControlApp:
 
     def _build_sys_panel(self, parent):
         s = self._sys_stats
-        panel = tk.Frame(parent, bg=BG_PANEL, relief="flat", bd=0,
-                         highlightbackground=BORDER, highlightthickness=1)
-        panel.pack(fill="x", pady=(0, 10), ipadx=12, ipady=10)
+        sw = {}
+        self._sys_widgets = sw
 
-        inner = tk.Frame(panel, bg=BG_PANEL)
-        inner.pack(fill="x", padx=12, pady=2)
-        inner.columnconfigure(0, weight=1)
-        inner.columnconfigure(1, weight=1)
+        # Same grid container as GPU panels
+        sys_frame = tk.Frame(parent, bg=BG)
+        sys_frame.pack(fill="x", pady=(0, 10))
+        sys_frame.columnconfigure(0, weight=1)
+        sys_frame.columnconfigure(1, weight=1)
 
-        # ── Left column: CPU temp (top) + RAM (bottom) ──────────────────────
-        left = tk.Frame(inner, bg=BG_PANEL)
-        left.grid(row=0, column=0, sticky="nsew")
+        # ── Left panel: CPU + Memory (col 0) ─────────────────────────────────
+        lp = tk.Frame(sys_frame, bg=BG_PANEL, relief="flat", bd=0,
+                      highlightbackground=BORDER, highlightthickness=1)
+        lp.grid(row=0, column=0, sticky="nsew", ipadx=16, ipady=12)
 
-        # CPU cell
-        cpu_cell = tk.Frame(left, bg=BG_PANEL)
-        cpu_cell.pack(fill="x", pady=(0, 6))
-        tk.Label(cpu_cell, text="CPU", font=("Sans", 9), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="w")
-        self._sw = sw = {}   # temp dict for widget refs
-        sw["cpu_label"] = tk.Label(cpu_cell,
-                                   text=f"{s['cpu_temp']:.0f}°C",
-                                   font=("Sans", 28, "bold"),
+        tk.Label(lp, text="CPU & Memory", font=("Sans", 14, "bold"),
+                 fg=FG, bg=BG_PANEL).pack(anchor="w", padx=12, pady=(8, 2))
+        tk.Label(lp, text="System", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="w", padx=12)
+
+        # CPU temp row (mirrors the temp + fan layout)
+        temp_frame = tk.Frame(lp, bg=BG_PANEL)
+        temp_frame.pack(fill="x", padx=12, pady=(12, 4))
+
+        sw["cpu_label"] = tk.Label(temp_frame,
+                                   text=f"{s['cpu_temp']:.0f}\u00b0C",
+                                   font=("Sans", 36, "bold"),
                                    fg=temp_color(s["cpu_temp"]), bg=BG_PANEL)
-        sw["cpu_label"].pack(anchor="w")
+        sw["cpu_label"].pack(side="left")
 
-        # RAM cell
-        ram_cell = tk.Frame(left, bg=BG_PANEL)
-        ram_cell.pack(fill="x")
-        tk.Label(ram_cell, text="MEMORY", font=("Sans", 9), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="w")
-        sw["ram_label"] = tk.Label(ram_cell,
+        ram_info = tk.Frame(temp_frame, bg=BG_PANEL)
+        ram_info.pack(side="right", anchor="e")
+        tk.Label(ram_info, text="RAM", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack()
+        sw["ram_label"] = tk.Label(ram_info,
                                    text=f"{s['ram_used']:.1f} / {s['ram_total']:.0f} GB",
                                    font=("Sans", 13, "bold"), fg=FG, bg=BG_PANEL)
-        sw["ram_label"].pack(anchor="w")
-        bar_bg = tk.Frame(ram_cell, bg=BG_INPUT, height=6)
-        bar_bg.pack(fill="x", pady=(4, 0))
+        sw["ram_label"].pack()
+
+        # RAM bar (mirrors fan bar)
+        bar_bg = tk.Frame(lp, bg=BG_INPUT, height=8)
+        bar_bg.pack(fill="x", padx=12, pady=(0, 12))
         bar_bg.pack_propagate(False)
-        sw["ram_bar"] = tk.Frame(bar_bg, bg=ACCENT, height=6)
+        sw["ram_bar"] = tk.Frame(bar_bg, bg=GREEN, height=8)
         sw["ram_bar"].place(relx=0, rely=0, relheight=1.0,
                             relwidth=max(0.01, s["ram_percent"] / 100))
 
-        # Vertical separator
-        tk.Frame(inner, bg=BORDER, width=1).grid(row=0, column=0,
-                                                  sticky="nse", padx=(0, 0))
-        sep = tk.Frame(inner, bg=BORDER, width=1)
-        sep.grid(row=0, column=0, sticky="nse")
-        tk.Frame(inner, bg=BORDER, width=1).grid(row=0, column=1,
-                                                  sticky="nsw", padx=(8, 0))
+        # ── Right panel: Network (col 1) ──────────────────────────────────────
+        rp = tk.Frame(sys_frame, bg=BG_PANEL, relief="flat", bd=0,
+                      highlightbackground=BORDER, highlightthickness=1)
+        rp.grid(row=0, column=1, sticky="nsew", padx=(8, 0), ipadx=16, ipady=12)
 
-        # ── Right column: Download (top) + Upload (bottom) ──────────────────
-        right = tk.Frame(inner, bg=BG_PANEL)
-        right.grid(row=0, column=1, sticky="nsew", padx=(16, 0))
+        tk.Label(rp, text="Network", font=("Sans", 14, "bold"),
+                 fg=FG, bg=BG_PANEL).pack(anchor="w", padx=12, pady=(8, 2))
+        tk.Label(rp, text="Live traffic", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="w", padx=12)
 
-        # Download cell
-        dl_cell = tk.Frame(right, bg=BG_PANEL)
-        dl_cell.pack(fill="x", pady=(0, 6))
-        tk.Label(dl_cell, text="↓  DOWNLOAD", font=("Sans", 9), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="w")
-        sw["dl_label"] = tk.Label(dl_cell,
+        # Centered content area
+        net_center = tk.Frame(rp, bg=BG_PANEL)
+        net_center.pack(expand=True, fill="both", padx=12, pady=(12, 8))
+
+        # Download
+        dl_frame = tk.Frame(net_center, bg=BG_PANEL)
+        dl_frame.pack(expand=True, fill="both")
+        tk.Label(dl_frame, text="\u2193  DOWNLOAD", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="center")
+        sw["dl_label"] = tk.Label(dl_frame,
                                   text=format_speed(s["net_down"]),
-                                  font=("Sans", 20, "bold"), fg=GREEN, bg=BG_PANEL)
-        sw["dl_label"].pack(anchor="w")
+                                  font=("Sans", 26, "bold"), fg=GREEN, bg=BG_PANEL)
+        sw["dl_label"].pack(anchor="center")
 
-        # Upload cell
-        ul_cell = tk.Frame(right, bg=BG_PANEL)
-        ul_cell.pack(fill="x")
-        tk.Label(ul_cell, text="↑  UPLOAD", font=("Sans", 9), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="w")
-        sw["ul_label"] = tk.Label(ul_cell,
+        tk.Frame(net_center, bg=BORDER, height=1).pack(fill="x", pady=6)
+
+        # Upload
+        ul_frame = tk.Frame(net_center, bg=BG_PANEL)
+        ul_frame.pack(expand=True, fill="both")
+        tk.Label(ul_frame, text="\u2191  UPLOAD", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="center")
+        sw["ul_label"] = tk.Label(ul_frame,
                                   text=format_speed(s["net_up"]),
-                                  font=("Sans", 20, "bold"), fg=ACCENT, bg=BG_PANEL)
-        sw["ul_label"].pack(anchor="w")
-
-        self._sys_widgets = sw
+                                  font=("Sans", 26, "bold"), fg=ACCENT, bg=BG_PANEL)
+        sw["ul_label"].pack(anchor="center")
 
     def _update_sys_panel(self):
         s = self._sys_stats
         sw = self._sys_widgets
-        sw["cpu_label"].config(text=f"{s['cpu_temp']:.0f}°C",
+        sw["cpu_label"].config(text=f"{s['cpu_temp']:.0f}\u00b0C",
                                fg=temp_color(s["cpu_temp"]))
         sw["ram_label"].config(text=f"{s['ram_used']:.1f} / {s['ram_total']:.0f} GB")
         sw["ram_bar"].place_configure(relwidth=max(0.01, s["ram_percent"] / 100))
