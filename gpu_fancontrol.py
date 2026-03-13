@@ -294,6 +294,12 @@ def format_speed(bps: float) -> str:
 def poll_sys_stats(stats: dict, last_net, last_time: float):
     """Update stats in-place. Returns (new_net_counters, new_time)."""
     stats["cpu_temp"] = get_cpu_temp()
+    try:
+        freq = psutil.cpu_freq()
+        stats["cpu_freq"] = freq.current / 1000.0
+        stats["cpu_freq_max"] = freq.max / 1000.0
+    except Exception:
+        pass
     mem = psutil.virtual_memory()
     stats["ram_used"] = mem.used / (1024 ** 3)
     stats["ram_total"] = mem.total / (1024 ** 3)
@@ -324,6 +330,7 @@ class GPUFanControlApp:
         # System stats
         self._sys_stats = {
             "cpu_temp": 0.0,
+            "cpu_freq": 0.0, "cpu_freq_max": 0.0,
             "ram_used": 0.0, "ram_total": 0.0, "ram_percent": 0.0,
             "net_down": 0.0, "net_up": 0.0,
         }
@@ -472,11 +479,29 @@ class GPUFanControlApp:
 
         # RAM bar (mirrors fan bar)
         bar_bg = tk.Frame(lp, bg=BG_INPUT, height=8)
-        bar_bg.pack(fill="x", padx=12, pady=(0, 12))
+        bar_bg.pack(fill="x", padx=12, pady=(0, 8))
         bar_bg.pack_propagate(False)
         sw["ram_bar"] = tk.Frame(bar_bg, bg=GREEN, height=8)
         sw["ram_bar"].place(relx=0, rely=0, relheight=1.0,
                             relwidth=max(0.01, s["ram_percent"] / 100))
+
+        # CPU frequency row
+        freq_frame = tk.Frame(lp, bg=BG_PANEL)
+        freq_frame.pack(fill="x", padx=12, pady=(4, 4))
+        tk.Label(freq_frame, text="FREQ", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(side="left")
+        sw["freq_label"] = tk.Label(freq_frame,
+                                    text=f"{s['cpu_freq']:.2f} / {s['cpu_freq_max']:.2f} GHz",
+                                    font=("Sans", 11, "bold"), fg=FG, bg=BG_PANEL)
+        sw["freq_label"].pack(side="right")
+
+        freq_bar_bg = tk.Frame(lp, bg=BG_INPUT, height=8)
+        freq_bar_bg.pack(fill="x", padx=12, pady=(0, 12))
+        freq_bar_bg.pack_propagate(False)
+        freq_ratio = (s["cpu_freq"] / s["cpu_freq_max"]) if s["cpu_freq_max"] > 0 else 0.01
+        sw["freq_bar"] = tk.Frame(freq_bar_bg, bg=ACCENT, height=8)
+        sw["freq_bar"].place(relx=0, rely=0, relheight=1.0,
+                             relwidth=max(0.01, freq_ratio))
 
         # ── Right panel: Network (row=0, col=1) ──────────────────────────────
         rp = tk.Frame(parent, bg=BG_PANEL, relief="flat", bd=0,
@@ -524,6 +549,9 @@ class GPUFanControlApp:
         ram_pct = s["ram_percent"]
         ram_color = RED if ram_pct >= 90 else ORANGE if ram_pct >= 75 else YELLOW if ram_pct >= 50 else GREEN
         sw["ram_bar"].config(bg=ram_color)
+        sw["freq_label"].config(text=f"{s['cpu_freq']:.2f} / {s['cpu_freq_max']:.2f} GHz")
+        freq_ratio = (s["cpu_freq"] / s["cpu_freq_max"]) if s["cpu_freq_max"] > 0 else 0.01
+        sw["freq_bar"].place_configure(relwidth=max(0.01, freq_ratio))
         sw["dl_label"].config(text=format_speed(s["net_down"]))
         sw["ul_label"].config(text=format_speed(s["net_up"]))
 
