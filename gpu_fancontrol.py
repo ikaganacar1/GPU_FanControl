@@ -425,31 +425,26 @@ class GPUFanControlApp:
         )
         self.toggle_btn.pack(side="right", padx=(0, 8))
 
-        # System metrics panel
-        self._build_sys_panel(main)
+        # One unified grid for all panels (sys row=0, GPU row=1)
+        all_panels = tk.Frame(main, bg=BG)
+        all_panels.pack(fill="both", expand=True)
+        all_panels.columnconfigure(0, weight=1)
+        all_panels.columnconfigure(1, weight=1)
 
-        # GPU panels
-        panels_frame = tk.Frame(main, bg=BG)
-        panels_frame.pack(fill="both", expand=True)
+        self._build_sys_panel(all_panels)
 
         for i, gpu in enumerate(self.gpus):
-            self._build_gpu_panel(panels_frame, gpu, i)
+            self._build_gpu_panel(all_panels, gpu, i)
 
     def _build_sys_panel(self, parent):
         s = self._sys_stats
         sw = {}
         self._sys_widgets = sw
 
-        # Same grid container as GPU panels
-        sys_frame = tk.Frame(parent, bg=BG)
-        sys_frame.pack(fill="x", pady=(0, 10))
-        sys_frame.columnconfigure(0, weight=1, uniform="sys")
-        sys_frame.columnconfigure(1, weight=1, uniform="sys")
-
-        # ── Left panel: CPU + Memory (col 0) ─────────────────────────────────
-        lp = tk.Frame(sys_frame, bg=BG_PANEL, relief="flat", bd=0,
+        # ── Left panel: CPU + Memory (row=0, col=0) ──────────────────────────
+        lp = tk.Frame(parent, bg=BG_PANEL, relief="flat", bd=0,
                       highlightbackground=BORDER, highlightthickness=1)
-        lp.grid(row=0, column=0, sticky="nsew", ipadx=16, ipady=12)
+        lp.grid(row=0, column=0, sticky="nsew", pady=(0, 10), ipadx=16, ipady=12)
 
         tk.Label(lp, text="CPU & Memory", font=("Sans", 14, "bold"),
                  fg=FG, bg=BG_PANEL).pack(anchor="w", padx=12, pady=(8, 2))
@@ -483,10 +478,10 @@ class GPUFanControlApp:
         sw["ram_bar"].place(relx=0, rely=0, relheight=1.0,
                             relwidth=max(0.01, s["ram_percent"] / 100))
 
-        # ── Right panel: Network (col 1) ──────────────────────────────────────
-        rp = tk.Frame(sys_frame, bg=BG_PANEL, relief="flat", bd=0,
+        # ── Right panel: Network (row=0, col=1) ──────────────────────────────
+        rp = tk.Frame(parent, bg=BG_PANEL, relief="flat", bd=0,
                       highlightbackground=BORDER, highlightthickness=1)
-        rp.grid(row=0, column=1, sticky="nsew", padx=(8, 0), ipadx=16, ipady=12)
+        rp.grid(row=0, column=1, sticky="nsew", padx=(8, 0), pady=(0, 10), ipadx=16, ipady=12)
 
         tk.Label(rp, text="Network", font=("Sans", 14, "bold"),
                  fg=FG, bg=BG_PANEL).pack(anchor="w", padx=12, pady=(8, 2))
@@ -538,9 +533,8 @@ class GPUFanControlApp:
 
         panel = tk.Frame(parent, bg=BG_PANEL, relief="flat", bd=0,
                          highlightbackground=BORDER, highlightthickness=1)
-        panel.grid(row=0, column=col, padx=(0 if col == 0 else 8, 0),
+        panel.grid(row=1, column=col, padx=(0 if col == 0 else 8, 0),
                    sticky="nsew", ipadx=16, ipady=12)
-        parent.columnconfigure(col, weight=1)
 
         w = {}
         self.gui_widgets[idx] = w
