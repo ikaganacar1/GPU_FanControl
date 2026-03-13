@@ -493,31 +493,27 @@ class GPUFanControlApp:
         tk.Label(rp, text="Live traffic", font=("Sans", 9), fg=FG_DIM,
                  bg=BG_PANEL).pack(anchor="w", padx=12)
 
-        # Centered content area
-        net_center = tk.Frame(rp, bg=BG_PANEL)
-        net_center.pack(expand=True, fill="both", padx=12, pady=(12, 8))
+        # Expand area that will hold the centered block
+        net_area = tk.Frame(rp, bg=BG_PANEL)
+        net_area.pack(expand=True, fill="both")
 
-        # Download
-        dl_frame = tk.Frame(net_center, bg=BG_PANEL)
-        dl_frame.pack(expand=True, fill="both")
-        tk.Label(dl_frame, text="\u2193  DOWNLOAD", font=("Sans", 9), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="center")
-        sw["dl_label"] = tk.Label(dl_frame,
-                                  text=format_speed(s["net_down"]),
+        # Content block — placed at dead center of net_area
+        net_block = tk.Frame(net_area, bg=BG_PANEL)
+        net_block.place(relx=0.5, rely=0.5, anchor="center")
+
+        tk.Label(net_block, text="\u2193  DOWNLOAD", font=("Sans", 9),
+                 fg=FG_DIM, bg=BG_PANEL).pack()
+        sw["dl_label"] = tk.Label(net_block, text=format_speed(s["net_down"]),
                                   font=("Sans", 26, "bold"), fg=GREEN, bg=BG_PANEL)
-        sw["dl_label"].pack(anchor="center")
+        sw["dl_label"].pack()
 
-        tk.Frame(net_center, bg=BORDER, height=1).pack(fill="x", pady=6)
+        tk.Frame(net_block, bg=BORDER, height=1, width=200).pack(pady=8)
 
-        # Upload
-        ul_frame = tk.Frame(net_center, bg=BG_PANEL)
-        ul_frame.pack(expand=True, fill="both")
-        tk.Label(ul_frame, text="\u2191  UPLOAD", font=("Sans", 9), fg=FG_DIM,
-                 bg=BG_PANEL).pack(anchor="center")
-        sw["ul_label"] = tk.Label(ul_frame,
-                                  text=format_speed(s["net_up"]),
+        tk.Label(net_block, text="\u2191  UPLOAD", font=("Sans", 9),
+                 fg=FG_DIM, bg=BG_PANEL).pack()
+        sw["ul_label"] = tk.Label(net_block, text=format_speed(s["net_up"]),
                                   font=("Sans", 26, "bold"), fg=ACCENT, bg=BG_PANEL)
-        sw["ul_label"].pack(anchor="center")
+        sw["ul_label"].pack()
 
     def _update_sys_panel(self):
         s = self._sys_stats
