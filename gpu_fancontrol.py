@@ -21,6 +21,7 @@ from tkinter import messagebox
 
 import ctypes
 import pynvml
+import psutil
 from PIL import Image, ImageDraw
 
 # ---------------------------------------------------------------------------
@@ -262,6 +263,53 @@ def temp_color(temp: int) -> str:
     return GREEN
 
 # ---------------------------------------------------------------------------
+# System stats (CPU, RAM, network)
+# ---------------------------------------------------------------------------
+
+def get_cpu_temp() -> float:
+    try:
+        temps = psutil.sensors_temperatures()
+        for sensor in ("k10temp", "coretemp", "cpu_thermal", "acpitz"):
+            if sensor not in temps:
+                continue
+            entries = temps[sensor]
+            # Prefer specific labels, fall back to first entry
+            for preferred in ("Tctl", "Tccd1", "Package id 0", ""):
+                for e in entries:
+                    if preferred in e.label:
+                        return e.current
+    except Exception:
+        pass
+    return 0.0
+
+
+def format_speed(bps: float) -> str:
+    if bps >= 1024 ** 2:
+        return f"{bps / 1024 ** 2:.1f} MB/s"
+    if bps >= 1024:
+        return f"{bps / 1024:.0f} KB/s"
+    return f"{bps:.0f} B/s"
+
+
+def poll_sys_stats(stats: dict, last_net, last_time: float):
+    """Update stats in-place. Returns (new_net_counters, new_time)."""
+    stats["cpu_temp"] = get_cpu_temp()
+    mem = psutil.virtual_memory()
+    stats["ram_used"] = mem.used / (1024 ** 3)
+    stats["ram_total"] = mem.total / (1024 ** 3)
+    stats["ram_percent"] = mem.percent
+    try:
+        net = psutil.net_io_counters()
+        now = time.time()
+        dt = now - last_time
+        if dt > 0 and last_net is not None:
+            stats["net_down"] = max(0.0, (net.bytes_recv - last_net.bytes_recv) / dt)
+            stats["net_up"]   = max(0.0, (net.bytes_sent - last_net.bytes_sent) / dt)
+        return net, now
+    except Exception:
+        return last_net, last_time
+
+# ---------------------------------------------------------------------------
 # Main Application
 # ---------------------------------------------------------------------------
 
@@ -272,6 +320,18 @@ class GPUFanControlApp:
         self.running = True
         self.helper = FanHelper()
         self.start_minimized = start_minimized
+
+        # System stats
+        self._sys_stats = {
+            "cpu_temp": 0.0,
+            "ram_used": 0.0, "ram_total": 0.0, "ram_percent": 0.0,
+            "net_down": 0.0, "net_up": 0.0,
+        }
+        try:
+            self._last_net = psutil.net_io_counters()
+        except Exception:
+            self._last_net = None
+        self._last_net_time = time.time()
 
         # Drag state for curve canvas interaction
         self._drag_states = {}   # gpu_idx -> point index being dragged, or None
@@ -365,12 +425,105 @@ class GPUFanControlApp:
         )
         self.toggle_btn.pack(side="right", padx=(0, 8))
 
+        # System metrics panel
+        self._build_sys_panel(main)
+
         # GPU panels
         panels_frame = tk.Frame(main, bg=BG)
         panels_frame.pack(fill="both", expand=True)
 
         for i, gpu in enumerate(self.gpus):
             self._build_gpu_panel(panels_frame, gpu, i)
+
+    def _build_sys_panel(self, parent):
+        s = self._sys_stats
+        panel = tk.Frame(parent, bg=BG_PANEL, relief="flat", bd=0,
+                         highlightbackground=BORDER, highlightthickness=1)
+        panel.pack(fill="x", pady=(0, 10), ipadx=12, ipady=10)
+
+        inner = tk.Frame(panel, bg=BG_PANEL)
+        inner.pack(fill="x", padx=12, pady=2)
+        inner.columnconfigure(0, weight=1)
+        inner.columnconfigure(1, weight=1)
+
+        # ── Left column: CPU temp (top) + RAM (bottom) ──────────────────────
+        left = tk.Frame(inner, bg=BG_PANEL)
+        left.grid(row=0, column=0, sticky="nsew")
+
+        # CPU cell
+        cpu_cell = tk.Frame(left, bg=BG_PANEL)
+        cpu_cell.pack(fill="x", pady=(0, 6))
+        tk.Label(cpu_cell, text="CPU", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="w")
+        self._sw = sw = {}   # temp dict for widget refs
+        sw["cpu_label"] = tk.Label(cpu_cell,
+                                   text=f"{s['cpu_temp']:.0f}°C",
+                                   font=("Sans", 28, "bold"),
+                                   fg=temp_color(s["cpu_temp"]), bg=BG_PANEL)
+        sw["cpu_label"].pack(anchor="w")
+
+        # RAM cell
+        ram_cell = tk.Frame(left, bg=BG_PANEL)
+        ram_cell.pack(fill="x")
+        tk.Label(ram_cell, text="MEMORY", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="w")
+        sw["ram_label"] = tk.Label(ram_cell,
+                                   text=f"{s['ram_used']:.1f} / {s['ram_total']:.0f} GB",
+                                   font=("Sans", 13, "bold"), fg=FG, bg=BG_PANEL)
+        sw["ram_label"].pack(anchor="w")
+        bar_bg = tk.Frame(ram_cell, bg=BG_INPUT, height=6)
+        bar_bg.pack(fill="x", pady=(4, 0))
+        bar_bg.pack_propagate(False)
+        sw["ram_bar"] = tk.Frame(bar_bg, bg=ACCENT, height=6)
+        sw["ram_bar"].place(relx=0, rely=0, relheight=1.0,
+                            relwidth=max(0.01, s["ram_percent"] / 100))
+
+        # Vertical separator
+        tk.Frame(inner, bg=BORDER, width=1).grid(row=0, column=0,
+                                                  sticky="nse", padx=(0, 0))
+        sep = tk.Frame(inner, bg=BORDER, width=1)
+        sep.grid(row=0, column=0, sticky="nse")
+        tk.Frame(inner, bg=BORDER, width=1).grid(row=0, column=1,
+                                                  sticky="nsw", padx=(8, 0))
+
+        # ── Right column: Download (top) + Upload (bottom) ──────────────────
+        right = tk.Frame(inner, bg=BG_PANEL)
+        right.grid(row=0, column=1, sticky="nsew", padx=(16, 0))
+
+        # Download cell
+        dl_cell = tk.Frame(right, bg=BG_PANEL)
+        dl_cell.pack(fill="x", pady=(0, 6))
+        tk.Label(dl_cell, text="↓  DOWNLOAD", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="w")
+        sw["dl_label"] = tk.Label(dl_cell,
+                                  text=format_speed(s["net_down"]),
+                                  font=("Sans", 20, "bold"), fg=GREEN, bg=BG_PANEL)
+        sw["dl_label"].pack(anchor="w")
+
+        # Upload cell
+        ul_cell = tk.Frame(right, bg=BG_PANEL)
+        ul_cell.pack(fill="x")
+        tk.Label(ul_cell, text="↑  UPLOAD", font=("Sans", 9), fg=FG_DIM,
+                 bg=BG_PANEL).pack(anchor="w")
+        sw["ul_label"] = tk.Label(ul_cell,
+                                  text=format_speed(s["net_up"]),
+                                  font=("Sans", 20, "bold"), fg=ACCENT, bg=BG_PANEL)
+        sw["ul_label"].pack(anchor="w")
+
+        self._sys_widgets = sw
+
+    def _update_sys_panel(self):
+        s = self._sys_stats
+        sw = self._sys_widgets
+        sw["cpu_label"].config(text=f"{s['cpu_temp']:.0f}°C",
+                               fg=temp_color(s["cpu_temp"]))
+        sw["ram_label"].config(text=f"{s['ram_used']:.1f} / {s['ram_total']:.0f} GB")
+        sw["ram_bar"].place_configure(relwidth=max(0.01, s["ram_percent"] / 100))
+        ram_pct = s["ram_percent"]
+        ram_color = RED if ram_pct >= 90 else ORANGE if ram_pct >= 75 else YELLOW if ram_pct >= 50 else GREEN
+        sw["ram_bar"].config(bg=ram_color)
+        sw["dl_label"].config(text=format_speed(s["net_down"]))
+        sw["ul_label"].config(text=format_speed(s["net_up"]))
 
     def _build_gpu_panel(self, parent, gpu, col):
         idx = gpu["index"]
@@ -609,6 +762,8 @@ class GPUFanControlApp:
             return
         try:
             poll_gpu_stats(self.gpus)
+            self._last_net, self._last_net_time = poll_sys_stats(
+                self._sys_stats, self._last_net, self._last_net_time)
 
             if self.fan_control_enabled:
                 for gpu in self.gpus:
@@ -626,6 +781,7 @@ class GPUFanControlApp:
                         self.helper.set_fan(idx, fan, target)
 
             self._update_readings()
+            self._update_sys_panel()
         except Exception:
             pass
 
